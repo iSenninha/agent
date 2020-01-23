@@ -35,4 +35,8 @@ public class Agent {
     public static void agentmain(String args, Instrumentation inst) {
         premain(args, inst);
     }
+
+    public static void main(String[] args) {
+        premain(args[0], null);
+    }
 }
