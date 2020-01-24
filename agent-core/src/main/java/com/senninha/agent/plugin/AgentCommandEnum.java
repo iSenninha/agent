@@ -2,15 +2,17 @@ package com.senninha.agent.plugin;
 
 import com.google.gson.GsonBuilder;
 import com.senninha.util.CommonUtil;
-import groovy.lang.GroovyClassLoader;
 import groovy.lang.GroovyShell;
-import org.codehaus.groovy.jsr223.GroovyScriptEngineImpl;
 
 import java.io.*;
+import java.lang.instrument.ClassDefinition;
 import java.lang.instrument.Instrumentation;
+import java.lang.instrument.UnmodifiableClassException;
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * agent command
@@ -40,66 +42,96 @@ public enum AgentCommandEnum {
             }
         }
     },
-    GROOVY_SCRIPT("gs", "gs scriptPath \n output will be print at tmp directory") {
+    GROOVY_SCRIPT("gs", "gs_scriptPath " +
+            "\t execute script, output will be append on tmp directory") {
         @Override
         public void action(String[] param, Instrumentation instrumentation) {
-            FileOutputStream fos;
-            Date current = new Date();
-            try {
-                fos = new FileOutputStream(CommonUtil.getTmpFileDirectory() + File.separator + "agent.log", true);
-            } catch (FileNotFoundException e) {
-                e.printStackTrace();
-                return;
-            }
+            String logName = CommonUtil.getTmpFileDirectory() + File.separator + "agent.log";
             try {
                 GroovyShell groovyShell = new GroovyShell(Thread.currentThread().getContextClassLoader());
                 String script;
-                FileInputStream sis = null;
-                try {
-                    sis = new FileInputStream(param[1]);
+                try (FileInputStream sis = new FileInputStream(param[1])) {
                     byte[] b = new byte[1024];
                     StringBuilder sb = new StringBuilder(1024);
                     int read = sis.read(b);
                     while (read != -1) {
-                        sb.append(new String(b, 0, read, "utf-8"));
+                        sb.append(new String(b, 0, read, StandardCharsets.UTF_8));
                         read = sis.read(b);
                     }
                     script = sb.toString();
                 } catch (Exception e) {
-                    fos.write(e.getMessage().getBytes());
-                    fos.write('\n');
+                    CommonUtil.appendWithLF(e.getMessage(), logName);
                     return;
-                } finally {
-                    if (sis != null) {
-                        sis.close();
-                    }
                 }
                 Object result = groovyShell.evaluate(script);
                 String json = new GsonBuilder().setPrettyPrinting().create().toJson(result);
-
-                fos.write(current.toString().getBytes());
-                fos.write('\n');
-                fos.write(json.getBytes());
-                fos.write('\n');
-                fos.write(current.toString().getBytes());
-                fos.write('\n');
+                String current = new Date().toString();
+                CommonUtil.appendWithLF(current, logName);
+                CommonUtil.appendWithLF(json, logName);
+                CommonUtil.appendWithLF(current, logName);
             } catch (Exception e) {
-                e.printStackTrace();
-                try {
-                    fos.write(e.getMessage().getBytes());
-                    fos.write('\n');
-                } catch (IOException ex) {
-                    ex.printStackTrace();
-                }
-            } finally {
-                if (fos != null) {
-                    try {
-                        fos.flush();
-                        fos.close();
-                    } catch (IOException e) {
-                    }
-                }
+                CommonUtil.appendWithLF(e.getMessage(), logName);
             }
+        }
+    },
+    HOT_SWAP("hotSwap", "hotSwap_hotSwapClassDirectory " +
+            "\t hot swap class output will be append on tmp directory") {
+        @Override
+        public void action(String[] param, Instrumentation instrumentation) {
+            String logName = CommonUtil.getTmpFileDirectory() + File.separator + "hotSwap.log";
+            CommonUtil.appendWithLF("start redefine", logName);
+            String fileDirectory = param[1];
+            File hotSwapDirectory = new File(fileDirectory);
+            if (!hotSwapDirectory.isDirectory()) {
+                CommonUtil.appendWithLF(String.format("%s doesn't exist or is a file", fileDirectory), logName);
+                return;
+            }
+            Map<String, ClassDefinition> redefineClass = new HashMap<>(16);
+            for (String redefineClassName : hotSwapDirectory.list()) {
+                if (!redefineClassName.endsWith(".class")) {
+                    continue;
+                }
+                File f = new File(redefineClassName);
+                if (f.isDirectory()) {
+                    continue;
+                }
+                int lastSeparator = redefineClassName.lastIndexOf(File.separator);
+                String clazzName = redefineClassName.substring(lastSeparator == -1 ? 0 : lastSeparator + 1);
+                clazzName = clazzName.replace(".class", "");
+                Class<?> clazz;
+                try {
+                    clazz = Class.forName(clazzName);
+                } catch (ClassNotFoundException e) {
+                    CommonUtil.appendWithLF(String.format("%s can not find this class", redefineClassName), logName);
+                    continue;
+                }
+                byte[] bytes = new byte[(int) f.length()];
+                try (FileInputStream fileInputStream = new FileInputStream(f)) {
+                    fileInputStream.read(bytes);
+                } catch (FileNotFoundException e) {
+                    CommonUtil.appendWithLF(e.getMessage(), logName);
+                    continue;
+                } catch (IOException e) {
+                    CommonUtil.appendWithLF(e.getMessage(), logName);
+                    continue;
+                }
+                redefineClass.put(clazz.getName(), new ClassDefinition(clazz, bytes));
+            }
+            for (Class loadedClass : instrumentation.getAllLoadedClasses()) {
+                ClassDefinition classDefinition = redefineClass.get(loadedClass.getName());
+                if (classDefinition == null) {
+                    continue;
+                }
+                try {
+                    instrumentation.redefineClasses(classDefinition);
+                } catch (ClassNotFoundException e) {
+                    CommonUtil.appendWithLF(e.getMessage(), logName);
+                } catch (UnmodifiableClassException e) {
+                    CommonUtil.appendWithLF(e.getMessage(), logName);
+                }
+                CommonUtil.appendWithLF(String.format("%s redefine success", loadedClass.getName()), logName);
+            }
+            CommonUtil.appendWithLF("finish redefine", logName);
         }
     },
     ;
@@ -131,7 +163,6 @@ public enum AgentCommandEnum {
                 return value;
             }
         }
-        System.err.println(String.format("can not find %s", param[0]));
         return null;
     }
 }

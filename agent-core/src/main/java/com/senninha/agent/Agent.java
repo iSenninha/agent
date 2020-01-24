@@ -11,7 +11,7 @@ import java.lang.instrument.Instrumentation;
 public class Agent {
     public static void premain(String args, Instrumentation inst) {
         if (args == null) {
-            System.err.println("input args is null");
+            help();
             return;
         }
         String[] param = args.split("_");
@@ -37,6 +37,10 @@ public class Agent {
     }
 
     public static void main(String[] args) {
+        if (args == null || args.length < 1) {
+            premain(null, null);
+            return;
+        }
         premain(args[0], null);
     }
 }
