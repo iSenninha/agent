@@ -60,7 +60,7 @@ public enum AgentCommandEnum {
                     }
                     script = sb.toString();
                 } catch (Exception e) {
-                    CommonUtil.appendWithLF(e.getMessage(), logName);
+                    CommonUtil.appendWithLF(e.getMessage(), logName, e);
                     return;
                 }
                 Object result = groovyShell.evaluate(script);
@@ -70,7 +70,7 @@ public enum AgentCommandEnum {
                 CommonUtil.appendWithLF(json, logName);
                 CommonUtil.appendWithLF(current, logName);
             } catch (Exception e) {
-                CommonUtil.appendWithLF(e.getMessage(), logName);
+                CommonUtil.appendWithLF(e.getMessage(), logName, e);
             }
         }
     },
@@ -87,51 +87,55 @@ public enum AgentCommandEnum {
                 return;
             }
             Map<String, ClassDefinition> redefineClass = new HashMap<>(16);
-            for (String redefineClassName : hotSwapDirectory.list()) {
-                if (!redefineClassName.endsWith(".class")) {
-                    continue;
+            try {
+                for (String redefineClassName : hotSwapDirectory.list()) {
+                    if (!redefineClassName.endsWith(".class")) {
+                        continue;
+                    }
+                    File f = new File(redefineClassName);
+                    if (f.isDirectory()) {
+                        continue;
+                    }
+                    int lastSeparator = redefineClassName.lastIndexOf(File.separator);
+                    String clazzName = redefineClassName.substring(lastSeparator == -1 ? 0 : lastSeparator + 1);
+                    clazzName = clazzName.replace(".class", "");
+                    Class<?> clazz;
+                    try {
+                        clazz = Class.forName(clazzName);
+                    } catch (ClassNotFoundException e) {
+                        CommonUtil.appendWithLF(String.format("%s can not find this class", redefineClassName), logName);
+                        continue;
+                    }
+                    byte[] bytes = new byte[(int) f.length()];
+                    try (FileInputStream fileInputStream = new FileInputStream(f)) {
+                        fileInputStream.read(bytes);
+                    } catch (FileNotFoundException e) {
+                        CommonUtil.appendWithLF(e.getMessage(), logName, e);
+                        continue;
+                    } catch (IOException e) {
+                        CommonUtil.appendWithLF(e.getMessage(), logName, e);
+                        continue;
+                    }
+                    redefineClass.put(clazz.getName(), new ClassDefinition(clazz, bytes));
                 }
-                File f = new File(redefineClassName);
-                if (f.isDirectory()) {
-                    continue;
+                for (Class loadedClass : instrumentation.getAllLoadedClasses()) {
+                    ClassDefinition classDefinition = redefineClass.get(loadedClass.getName());
+                    if (classDefinition == null) {
+                        continue;
+                    }
+                    try {
+                        instrumentation.redefineClasses(classDefinition);
+                    } catch (ClassNotFoundException e) {
+                        CommonUtil.appendWithLF(e.getMessage(), logName, e);
+                    } catch (UnmodifiableClassException e) {
+                        CommonUtil.appendWithLF(e.getMessage(), logName, e);
+                    }
+                    CommonUtil.appendWithLF(String.format("%s redefine success", loadedClass.getName()), logName);
                 }
-                int lastSeparator = redefineClassName.lastIndexOf(File.separator);
-                String clazzName = redefineClassName.substring(lastSeparator == -1 ? 0 : lastSeparator + 1);
-                clazzName = clazzName.replace(".class", "");
-                Class<?> clazz;
-                try {
-                    clazz = Class.forName(clazzName);
-                } catch (ClassNotFoundException e) {
-                    CommonUtil.appendWithLF(String.format("%s can not find this class", redefineClassName), logName);
-                    continue;
-                }
-                byte[] bytes = new byte[(int) f.length()];
-                try (FileInputStream fileInputStream = new FileInputStream(f)) {
-                    fileInputStream.read(bytes);
-                } catch (FileNotFoundException e) {
-                    CommonUtil.appendWithLF(e.getMessage(), logName);
-                    continue;
-                } catch (IOException e) {
-                    CommonUtil.appendWithLF(e.getMessage(), logName);
-                    continue;
-                }
-                redefineClass.put(clazz.getName(), new ClassDefinition(clazz, bytes));
+                CommonUtil.appendWithLF("finish redefine", logName);
+            } catch (Exception e) {
+                CommonUtil.appendWithLF(e.getMessage(), logName, e);
             }
-            for (Class loadedClass : instrumentation.getAllLoadedClasses()) {
-                ClassDefinition classDefinition = redefineClass.get(loadedClass.getName());
-                if (classDefinition == null) {
-                    continue;
-                }
-                try {
-                    instrumentation.redefineClasses(classDefinition);
-                } catch (ClassNotFoundException e) {
-                    CommonUtil.appendWithLF(e.getMessage(), logName);
-                } catch (UnmodifiableClassException e) {
-                    CommonUtil.appendWithLF(e.getMessage(), logName);
-                }
-                CommonUtil.appendWithLF(String.format("%s redefine success", loadedClass.getName()), logName);
-            }
-            CommonUtil.appendWithLF("finish redefine", logName);
         }
     },
     ;

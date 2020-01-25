@@ -1,9 +1,6 @@
 package com.senninha.util;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 
 /**
  * Coded by senninha on 2020/1/21
@@ -14,10 +11,20 @@ public class CommonUtil {
     }
 
     public static void appendWithLF(String content, String fileName) {
-        append(content, fileName, true);
+        append(content, fileName, true, null);
     }
 
-    public static void append(String content, String fileName, boolean needLF) {
+    public static void appendWithLF(String content, String fileName, Exception e) {
+        append(content, fileName, true, e);
+    }
+
+    private static class FakePrintWriter extends PrintWriter {
+        public FakePrintWriter(OutputStream out, boolean autoFlush) {
+            super(out, autoFlush);
+        }
+    }
+
+    public static void append(String content, String fileName, boolean needLF, Exception e) {
         File file = new File(fileName);
         if (file.isDirectory()) {
             throw new RuntimeException(String.format("%s is a directory"));
@@ -28,16 +35,21 @@ public class CommonUtil {
             File f = new File(dir);
             f.mkdirs();
         }
-        try (FileOutputStream fos = new FileOutputStream(fileName, true)) {
-            fos.write(content.getBytes());
+        try (PrintWriter fakePrintWriter = new FakePrintWriter(new FileOutputStream(fileName, true), true)) {
+            fakePrintWriter.write(content);
             if (needLF) {
-                fos.write('\n');
+                fakePrintWriter.write('\n');
             }
-            fos.flush();
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
+            if (e != null) {
+                e.printStackTrace(fakePrintWriter);
+                if (needLF) {
+                    fakePrintWriter.write('\n');
+                }
+            }
+        } catch (FileNotFoundException ex) {
+            ex.printStackTrace();
+        } catch (IOException ex) {
+            ex.printStackTrace();
         }
     }
 }
