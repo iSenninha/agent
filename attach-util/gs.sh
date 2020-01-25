@@ -23,7 +23,7 @@ fi
 
 
 # 调用脚本文件
-sh agent.sh $1 "gs_""$2"
+bash agent.sh $1 "gs_""$2"
 if [ -f $tmpFile ]; then
   echo "输出结果:$tmpFile"
   cat $tmpFile
