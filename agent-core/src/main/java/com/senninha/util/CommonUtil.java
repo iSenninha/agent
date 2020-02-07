@@ -27,7 +27,7 @@ public class CommonUtil {
     public static void append(String content, String fileName, boolean needLF, Exception e) {
         File file = new File(fileName);
         if (file.isDirectory()) {
-            throw new RuntimeException(String.format("%s is a directory"));
+            throw new RuntimeException(String.format("%s is a directory", fileName));
         }
         if (!file.exists()) {
             int endIndex = fileName.lastIndexOf(File.separator);
@@ -47,8 +47,6 @@ public class CommonUtil {
                 }
             }
         } catch (FileNotFoundException ex) {
-            ex.printStackTrace();
-        } catch (IOException ex) {
             ex.printStackTrace();
         }
     }
